@@ -1,0 +1,173 @@
+package com.google.zxing.client.android;
+
+import com.google.zxing.ResultPoint;
+import com.google.zxing.client.android.camera.CameraManager;
+
+import android.content.Context;
+import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
+import android.util.AttributeSet;
+import android.util.Log;
+import android.view.View;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * This view is overlaid on top of the camera preview. It adds the viewfinder rectangle and partial
+ * transparency outside it, as well as the laser scanner animation and result points.
+ *
+ * @author dswitkin@google.com (Daniel Switkin)
+ */
+public final class ViewfinderView extends View {
+
+  private static final int[] SCANNER_ALPHA = {0, 64, 128, 192, 255, 192, 128, 64};
+  private static final long ANIMATION_DELAY = 80L;
+  private static final int CURRENT_POINT_OPACITY = 0xA0;
+  private static final int MAX_RESULT_POINTS = 20;
+  private static final int POINT_SIZE = 6;
+
+  private CameraManager cameraManager;
+  private final Paint paint;
+  private Bitmap resultBitmap;
+  private Bitmap backGroundBitmap;
+  private final int maskColor;
+  private final int resultColor;
+  private final int laserColor;
+  private final int resultPointColor;
+  private int scannerAlpha;
+  private List<ResultPoint> possibleResultPoints;
+  private List<ResultPoint> lastPossibleResultPoints;
+  private static final String TAG = ViewfinderView.class.getSimpleName();
+  
+	private Bitmap mBmpLine;
+	private BitmapDrawable mBmpLineDrawable;
+	
+	private Bitmap mBmpLT;
+	private Bitmap mBmpTR;
+	private Bitmap mBmpLB;
+	private Bitmap mBmpRB;
+
+  // This constructor is used when the class is built from an XML resource.
+  public ViewfinderView(Context context, AttributeSet attrs) {
+    super(context, attrs);
+
+    // Initialize these once for performance rather than calling them every time in onDraw().
+    paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    Resources resources = getResources();
+    maskColor = resources.getColor(R.color.viewfinder_mask);
+    resultColor = resources.getColor(R.color.result_view);
+    backGroundBitmap = BitmapFactory.decodeResource(resources, R.drawable.barcode_background);
+    laserColor = resources.getColor(R.color.viewfinder_laser);
+    resultPointColor = resources.getColor(R.color.possible_result_points);
+    scannerAlpha = 0;
+    possibleResultPoints = new ArrayList<ResultPoint>(5);
+    lastPossibleResultPoints = null;
+    mBmpLine = BitmapFactory.decodeResource(getResources(), R.drawable.barcode_line);
+	mBmpLineDrawable = new BitmapDrawable(mBmpLine);
+	
+	mBmpLT = BitmapFactory.decodeResource(getResources(), R.drawable.barcode_lt);
+	mBmpTR = BitmapFactory.decodeResource(getResources(), R.drawable.barcode_tr);
+	mBmpLB = BitmapFactory.decodeResource(getResources(), R.drawable.barcode_lb);
+	mBmpRB = BitmapFactory.decodeResource(getResources(), R.drawable.barcode_br);
+  }
+
+  public void setCameraManager(CameraManager cameraManager) {
+    this.cameraManager = cameraManager;
+  }
+
+  @Override
+  public void onDraw(Canvas canvas) {
+    if (cameraManager == null) {
+      return; // not ready yet, early draw before done configuring
+    }
+    Rect frame = cameraManager.getFramingRect();
+    if (frame == null) {
+      return;
+    }
+    int width = canvas.getWidth();
+    int height = canvas.getHeight();
+
+    // Draw the exterior (i.e. outside the framing rect) darkened
+    paint.setColor(resultBitmap != null ? resultColor : maskColor);
+    canvas.drawRect(0, 0, width, frame.top, paint);
+    canvas.drawRect(0, frame.top, frame.left, frame.bottom + 1, paint);
+    canvas.drawRect(frame.right + 1, frame.top, width, frame.bottom + 1, paint);
+    canvas.drawRect(0, frame.bottom + 1, width, height, paint);
+
+    if (resultBitmap != null) {
+    	Log.i(TAG, "resultBitmap is not null");
+      // Draw the opaque result bitmap over the scanning rectangle
+      paint.setAlpha(CURRENT_POINT_OPACITY);
+      canvas.drawBitmap(resultBitmap, null, frame, paint);
+    } else {
+    	if (lineTop == 0) {
+			lineTop = frame.top;
+		}
+		drawLine(canvas, frame);	
+    }
+    	
+	// 绘制4个角
+	canvas.drawBitmap(mBmpLT, frame.left - 5, frame.top - 5, null);
+	canvas.drawBitmap(mBmpTR, frame.right - mBmpTR.getWidth() + 5, frame.top - 5, null);
+	canvas.drawBitmap(mBmpLB, frame.left - 5, frame.bottom - mBmpLB.getHeight() + 5, null);
+	canvas.drawBitmap(mBmpRB, frame.right - mBmpRB.getWidth() + 5, frame.bottom - mBmpRB.getHeight() + 5, null);
+  }
+
+  	private int lineTop;
+	
+	private void drawLine(Canvas canvas, Rect frame) {
+	// 绘制线条
+	int left = frame.left;;
+	int right = frame.right;
+	int top = lineTop;
+	mBmpLineDrawable.setBounds(left, top, right, top + mBmpLine.getHeight());
+	mBmpLineDrawable.draw(canvas);
+	
+	lineTop += 3;
+	
+	if (lineTop +  mBmpLine.getHeight() >= frame.bottom) {
+		lineTop = frame.top;
+	}
+	
+	postInvalidateDelayed(10, frame.left, frame.top, frame.right, frame.bottom);
+}
+  
+  public void drawViewfinder() {
+    Bitmap resultBitmap = this.resultBitmap;
+    this.resultBitmap = null;
+    if (resultBitmap != null) {
+      Log.i(TAG, "result Bitmap recycle");
+      resultBitmap.recycle();
+    }
+    invalidate();
+  }
+
+  /**
+   * Draw a bitmap with the result points highlighted instead of the live scanning display.
+   *
+   * @param barcode An image of the decoded barcode.
+   */
+  public void drawResultBitmap(Bitmap barcode) {
+    resultBitmap = barcode;
+    invalidate();
+  }
+
+  public void addPossibleResultPoint(ResultPoint point) {
+    List<ResultPoint> points = possibleResultPoints;
+    synchronized (points) {
+      points.add(point);
+      int size = points.size();
+      if (size > MAX_RESULT_POINTS) {
+        // trim it
+        points.subList(0, size - MAX_RESULT_POINTS / 2).clear();
+      }
+    }
+  }
+
+}
