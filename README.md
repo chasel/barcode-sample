@@ -1,0 +1,1 @@
+Barcode Sample base Zxing
